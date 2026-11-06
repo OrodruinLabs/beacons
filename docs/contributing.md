@@ -6,14 +6,11 @@ beacons is for one person's own accounts on one machine. Requests for sharing mo
 
 ## Branches and releases
 
-Work happens on `dev`. `main` holds released code only, and it is what the plugin marketplace installs. It moves only by a fast-forward to a `v*` tag that has been released.
+Work happens on `main`, which is what the plugin marketplace installs. A release is a `v*` tag on a commit of `main`:
 
-A release:
-
-1. Set the new version in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, on `dev`.
+1. Set the new version in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 2. Tag that commit `v<version>` and push the tag. Only admins can create `v*` tags.
-3. `release.yml` checks the tag against `plugin.json` and against `main`, runs the checks, and publishes the GitHub release.
-4. It then prints the push that fast-forwards `main` to the tag. Only admins can move `main`, so an admin runs it.
+3. `release.yml` checks that the tag matches `plugin.json` and is on `main`, runs the checks, and publishes the GitHub release.
 
 ## The checks
 
