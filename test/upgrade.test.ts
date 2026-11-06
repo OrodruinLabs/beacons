@@ -635,11 +635,12 @@ test("bootCheck: a build that fails at load, or never listens, is refused with w
 
   // Only the tail, about 500 characters, and never a token.
   const token = "sk-ant-ort01-" + "a1B2c3D4".repeat(10)
+  // exitCode, not process.exit(): exit can drop stderr writes still pending on a pipe, and the test reads the last ones.
   const noisy = codeRelease(
     p,
     "1.0.1",
     `for (let i = 0; i < 200; i++) process.stderr.write("line " + i + " of noise\\n")\n` +
-      `process.stderr.write("beacons: refresh failed for ${token}: Bearer ${token}\\n")\nprocess.exit(3)\n`,
+      `process.stderr.write("beacons: refresh failed for ${token}: Bearer ${token}\\n")\nprocess.exitCode = 3\n`,
   )
   await assert.rejects(bootCheck(noisy, p), (err: Error) => {
     assert.match(err.message, /^exited 3 before answering: /)
