@@ -1,0 +1,166 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+#
+# The beacons bootstrap. It runs the CLI on beacons' own Node, never the system
+# one: <data>/node/<version>/bin/node, where <version> is the first line of the
+# node-sha256.txt beside this script, so a release snapshot runs on the Node it
+# was made with. When that Node is missing, it fetches the official archive for
+# this platform, checks it against the SHA-256 in node-sha256.txt, refuses it on
+# a mismatch, and keeps only bin/node. node/current is pointed at the first Node
+# installed, and is left alone after that: later switches are the releases' own.
+#
+# `beacons status --line` needs no Node: one curl to the daemon, with an answer
+# within about a second even when the daemon is down or hung.
+#
+# The data and config folders follow XDG, as src/paths.ts does. BEACONS_NODE_DIST
+# replaces https://nodejs.org/dist/v<version> as the archive source (tests).
+# The CLI runs with BEACONS_ROOT set to the folder this script belongs to.
+
+die() {
+  printf 'beacons: %s\n' "$*" >&2
+  exit 1
+}
+
+[ -n "${HOME:-}" ] || die "HOME is not set"
+# Only an absolute XDG folder counts; a relative one is ignored, as the XDG spec says and src/paths.ts does.
+case ${XDG_DATA_HOME:-} in
+  /*) data=$XDG_DATA_HOME/beacons ;;
+  *) data=$HOME/.local/share/beacons ;;
+esac
+case ${XDG_CONFIG_HOME:-} in
+  /*) config=$XDG_CONFIG_HOME/beacons ;;
+  *) config=$HOME/.config/beacons ;;
+esac
+
+# --- the status line: no Node ----------------------------------------------
+
+# Claude Code's status-line JSON on stdin; prints one line. The daemon answers
+# for the session (or, for a session it has not served, from the profile's
+# route). When it does not answer within a second, the profile's settings.json
+# says which: routed to this gateway is down, anything else is direct.
+status_line() {
+  input=
+  [ -t 0 ] || input=$(cat)
+  # Only an id the daemon takes, and never a leading dot (curl would read "." or
+  # ".." as a path step); anything else asks for the profile's line alone.
+  sid=$(printf '%s\n' "$input" | LC_ALL=C sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9_-][A-Za-z0-9._-]\{0,127\}\)".*/\1/p' | head -n 1)
+  [ -n "$sid" ] || sid=-
+
+  port=$(LC_ALL=C sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$config/gateway.json" 2>/dev/null | head -n 1)
+  case $port in
+    '' | *[!0-9]*) port=4774 ;;
+  esac
+  { [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; } || port=4774
+
+  # The profile as routes.json names it: absolute, no trailing slash.
+  profile=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+  case $profile in
+    /*) ;;
+    *) profile=$PWD/$profile ;;
+  esac
+  while [ "$profile" != / ] && [ "${profile%/}" != "$profile" ]; do
+    profile=${profile%/}
+  done
+  # Every byte percent-encoded: safe for any name, and the daemon decodes it whole.
+  query=$(printf '%s' "$profile" | od -A n -t x1 -v | tr -d ' \n' | sed 's/../%&/g')
+
+  # -q first: no ~/.curlrc (a retry there would break the time limit, an include the line).
+  if line=$(curl -q -sf --noproxy '*' --max-time 1 "http://127.0.0.1:$port/beacons/v1/sessions/$sid?profile=$query&format=line" 2>/dev/null) && [ -n "$line" ]; then
+    printf '%s\n' "$line"
+  elif grep -qF "127.0.0.1:$port/" "$profile/settings.json" 2>/dev/null; then
+    printf '%s\n' '◕ beacons down'
+  else
+    printf '%s\n' '◔ beacons direct'
+  fi
+}
+
+if [ "$#" -eq 2 ] && [ "$1" = status ] && [ "$2" = --line ]; then
+  status_line
+  exit 0
+fi
+
+# --- where this script lives -----------------------------------------------
+
+# macOS has no readlink -f, so each link is followed by hand.
+self=$0
+hops=0
+while [ -L "$self" ]; do
+  hops=$((hops + 1))
+  [ "$hops" -le 40 ] || die "too many links from $0"
+  link=$(readlink "$self") || die "cannot read the link $self"
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+root=$(CDPATH='' cd -P "$(dirname "$self")/.." && pwd) || die "cannot find the folder $self is in"
+
+# --- the Node --------------------------------------------------------------
+
+sums=$root/node-sha256.txt
+[ -f "$sums" ] || die "$sums is missing; reinstall the beacons plugin"
+version=$(LC_ALL=C sed -n '1s/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)[[:space:]]*$/\1/p' "$sums")
+[ -n "$version" ] || die "the first line of $sums names no Node version"
+node=$data/node/$version/bin/node
+
+# The SHA-256 of a file, in lowercase hex. Read on stdin, so no path can change
+# how the tool prints its line.
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sum=$(sha256sum <"$1") || return 1
+  elif command -v shasum >/dev/null 2>&1; then
+    sum=$(shasum -a 256 <"$1") || return 1
+  else
+    return 1
+  fi
+  printf '%s\n' "${sum%% *}"
+}
+
+# Fetch, check and install this platform's Node. A subshell: its umask, traps
+# and exits stay inside it, and the download folder goes with it.
+install_node() (
+  umask 077
+  os=$(uname -s)
+  arch=$(uname -m)
+  case $os in
+    Darwin) os=darwin ;;
+    Linux) os=linux ;;
+    *) die "there is no Node build for $os; beacons runs on macOS and Linux" ;;
+  esac
+  case $arch in
+    arm64 | aarch64) arch=arm64 ;;
+    x86_64 | amd64) arch=x64 ;;
+    *) die "there is no Node build for $arch; beacons runs on arm64 and x86_64" ;;
+  esac
+  name=node-v$version-$os-$arch
+  archive=$name.tar.gz
+  want=$(awk -v a="$archive" 'NR > 1 && $2 == a { print $1; exit }' "$sums")
+  [ -n "$want" ] || die "$sums has no SHA-256 for $archive"
+  base=${BEACONS_NODE_DIST:-https://nodejs.org/dist/v$version}
+
+  mkdir -p "$data/node" || die "cannot create $data/node"
+  tmp=$(mktemp -d "$data/node/.fetch.XXXXXX") || die "cannot create a download folder in $data/node"
+  trap 'rm -rf "$tmp"' EXIT
+  trap 'exit 1' HUP INT TERM
+
+  printf 'beacons: fetching Node %s for %s-%s\n' "$version" "$os" "$arch" >&2
+  curl -q -fsSL -o "$tmp/$archive" "$base/$archive" || die "downloading $base/$archive failed"
+  got=$(sha256 "$tmp/$archive") || die "cannot check $archive: neither sha256sum nor shasum is installed"
+  [ "$got" = "$want" ] || die "$archive does not match its SHA-256 in $sums (expected $want, got $got); refusing it"
+  # From inside $tmp: GNU tar reads backslash escapes in a -C folder, so a path that has one is never given to it.
+  (cd "$tmp" && tar -xzf "$archive" "$name/bin/node") || die "cannot unpack bin/node from $archive"
+  chmod 0755 "$tmp/$name/bin/node" || die "cannot make $name/bin/node executable"
+
+  mkdir -p "$data/node/$version/bin" || die "cannot create $data/node/$version/bin"
+  mv -f "$tmp/$name/bin/node" "$node" || die "cannot install $node"
+  if [ ! -e "$data/node/current" ] && [ ! -L "$data/node/current" ]; then
+    ln -s "$version" "$data/node/current" 2>/dev/null || [ -L "$data/node/current" ] || die "cannot link $data/node/current"
+  fi
+)
+
+[ -x "$node" ] || install_node || exit 1
+# The plugin copy this CLI came from, for the verbs that need one (setup,
+# upgrade, the hook). A detached upgrade gets no other way to know it.
+export BEACONS_ROOT="$root"
+exec "$node" --experimental-strip-types --no-warnings "$root/src/cli.ts" "$@"

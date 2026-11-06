@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+
+name: Bug
+description: Something in beacons does not work as its docs say.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Account names are emails by default, and they appear in `beacons status`. Replace each one (for example with `account-1`) before you paste anything here. Never paste a token, a `settings.json` with secrets in it, or prompt text.
+
+        Requests for sharing, team or remote modes are declined; see [Contributing](https://github.com/OrodruinLabs/beacons/blob/main/docs/contributing.md).
+  - type: input
+    id: version
+    attributes:
+      label: beacons version
+      description: The `version` in the plugin's `.claude-plugin/plugin.json`, or the version `beacons status` shows.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - WSL
+    validations:
+      required: true
+  - type: input
+    id: claude-code
+    attributes:
+      label: Claude Code version
+      description: The output of `claude --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. beacons setup ...
+        2. ...
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `beacons status`
+      description: With the account names replaced.
+      render: text
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Before you send
+      options:
+        - label: I replaced account emails, and left out tokens and prompt text.
+          required: true

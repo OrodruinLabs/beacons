@@ -1,0 +1,13 @@
+version = 1
+
+[[annotations]]
+path = ["src/engine/**", "test/engine/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 KarpelesLab"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["**/*.json", "package-lock.json", "node-sha256.txt", "docs/**", "assets/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Orodruin Labs"
+SPDX-License-Identifier = "MIT"

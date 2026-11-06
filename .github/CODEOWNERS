@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+#
+# The workflows and these rules decide what reaches users.
+/.github/ @morpheums

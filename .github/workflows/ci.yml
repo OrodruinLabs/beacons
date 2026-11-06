@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+#
+# The checks: on every push to a branch, every pull request, and every release
+# (release.yml calls this workflow).
+#
+#   checks   on macOS (arm64) and Ubuntu, on Node 26.13.0: install, typecheck,
+#            the tests (the smoke test among them), shellcheck, the plugin
+#            validator and REUSE
+#   smoke    the end-to-end smoke test on its own, on both
+#   launchd  the real launchd unit, under a test label (test/live.test.ts).
+#            It may fail without failing the run until it has passed here.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  checks:
+    name: checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.0
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: shellcheck
+        run: |
+          command -v shellcheck >/dev/null || brew install shellcheck
+          shellcheck bin/beacons hooks/session-start
+      - name: plugin validate
+        run: npx -y @anthropic-ai/claude-code plugin validate .
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+      - name: REUSE
+        run: uvx --with charset-normalizer reuse lint
+
+  smoke:
+    name: smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.0
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run test:smoke
+
+  launchd:
+    name: launchd (live)
+    runs-on: macos-15
+    # Until this job has passed on a hosted runner once.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.0
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run test:live
+        env:
+          BEACONS_LIVE: "1"

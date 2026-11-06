@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+
+node_modules/
+*.log
+.DS_Store

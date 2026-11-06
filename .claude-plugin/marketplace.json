@@ -1,0 +1,14 @@
+{
+  "name": "beacons",
+  "description": "Pools your Claude accounts behind a small local gateway.",
+  "owner": {
+    "name": "Orodruin Labs"
+  },
+  "plugins": [
+    {
+      "name": "beacons",
+      "source": "./",
+      "description": "Pools your Claude accounts behind a small local gateway."
+    }
+  ]
+}

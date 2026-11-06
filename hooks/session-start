@@ -1,0 +1,26 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+#
+# The SessionStart heal hook. Before setup there is no release to run, so it
+# only says how to set up. After, it hands the hook, stdin included, to the
+# current release's bootstrap, which runs `beacons hook session-start`: that
+# restarts a stopped service, waits out an update, and starts an upgrade when
+# this plugin copy is newer. CLAUDE_PLUGIN_ROOT stays exported, so the CLI
+# knows which plugin copy, and so which version, called it.
+#
+# The data folder follows XDG, as bin/beacons and src/paths.ts do: only an
+# absolute XDG_DATA_HOME counts, and a relative one is ignored.
+
+case ${XDG_DATA_HOME:-} in
+  /*) data=$XDG_DATA_HOME/beacons ;;
+  *) data=${HOME:-}/.local/share/beacons ;;
+esac
+release=$data/releases/current
+
+if [ ! -f "$release/release.json" ]; then
+  printf '%s\n' '{"systemMessage":"beacons is installed but not set up: run /beacons:setup or beacons setup in a terminal."}'
+  exit 0
+fi
+
+exec sh "$release/bin/beacons" hook session-start

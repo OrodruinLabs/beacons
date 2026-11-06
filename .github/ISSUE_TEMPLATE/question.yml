@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+
+name: Question
+description: Ask how beacons works, or how to set it up.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Leave out account emails, tokens and prompt text.
+
+        Requests for sharing, team or remote modes are declined; see [Contributing](https://github.com/OrodruinLabs/beacons/blob/main/docs/contributing.md).
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: beacons version
+      description: If it matters to the question.
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux
+        - WSL

@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+#
+# The engine watch, weekly. src/engine/ is teamclaude's engine, vendored, with
+# fixes from later releases ported by hand. This lists the teamclaude releases
+# newer than the baseline in .github/engine-watch.json, each with the engine
+# files it changes against the release before it, and opens one issue for
+# them, or updates the open one it opened before. Releases whose tag is not a
+# plain version (v1.2.3, v1.2.3-rc.1) are passed over. It only reports: it never changes
+# code. Taking a release is a port by hand; then the baseline moves and the
+# issue is closed.
+name: engine watch
+
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: engine-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: teamclaude releases
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: List the releases newer than the baseline, and open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: KarpelesLab/teamclaude
+          TITLE: "Engine watch: teamclaude releases newer than the baseline"
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          base=$(jq -er .teamclaude .github/engine-watch.json)
+
+          # The vendored engine, by the paths it has upstream: src/<file> and test/<file>.
+          for f in src/engine/*; do printf 'src/%s\n' "${f##*/}"; done > "$work/engine"
+          for f in test/engine/*; do printf 'test/%s\n' "${f##*/}"; done >> "$work/engine"
+
+          # Published releases (no drafts) whose tag is a plain version, so no tag name can put Markdown or
+          # an @-mention into the issue; then the ones after the baseline, oldest first.
+          gh api --paginate "repos/$UPSTREAM/releases?per_page=100" \
+            --jq '.[] | select((.draft | not) and (.tag_name | test("^v[0-9]+(\\.[0-9]+)*(-[0-9A-Za-z.]+)?$"))) | [.tag_name, (.published_at // "" | .[0:10])] | @tsv' > "$work/releases"
+          { printf '%s\n' "$base"; cut -f1 "$work/releases"; } | sort -V -u \
+            | awk -v base="$base" 'after { print } $0 == base { after = 1 }' > "$work/newer"
+          if [ ! -s "$work/newer" ]; then
+            echo "No teamclaude release is newer than $base."
+            exit 0
+          fi
+
+          {
+            echo "teamclaude has releases newer than \`$base\`, the baseline in \`.github/engine-watch.json\`. Each lists the files of the vendored engine (\`src/engine/\`, \`test/engine/\`) it changes, against the release before it."
+            echo
+            prev=$base
+            while read -r tag; do
+              date=$(awk -F '\t' -v t="$tag" '$1 == t { print $2; exit }' "$work/releases")
+              gh api "repos/$UPSTREAM/compare/$prev...$tag" --jq '.files[].filename' < /dev/null | sort -u > "$work/files"
+              echo "### [$tag](https://github.com/$UPSTREAM/releases/tag/$tag) ($date)"
+              echo
+              if grep -Fxf "$work/engine" "$work/files" > "$work/touched"; then
+                # shellcheck disable=SC2016 # the backticks are Markdown
+                while read -r f; do printf -- '- `%s`\n' "$f"; done < "$work/touched"
+              else
+                echo "None of the engine files."
+              fi
+              others=$(grep -Fvxf "$work/engine" "$work/files" | grep -c . || true)
+              echo
+              echo "Other files changed: $others."
+              echo
+              prev=$tag
+            done < "$work/newer"
+            echo "To take a release: port what beacons needs into \`src/engine/\` and \`test/engine/\` (\`src/engine/README.md\` lists what was ported and how), move the baseline in \`.github/engine-watch.json\`, and close this issue. This workflow only reports; it never changes code."
+          } > "$work/body"
+
+          # Only an issue this workflow opened: never one someone else titled the same.
+          number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" \
+            | jq -r --arg title "$TITLE" '.[] | select(.pull_request == null and .title == $title and .user.login == "github-actions[bot]") | .number' | head -n 1)
+          if [ -z "$number" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$work/body"
+          elif [ "$(gh issue view "$number" --repo "$GITHUB_REPOSITORY" --json body --jq .body)" != "$(cat "$work/body")" ]; then
+            gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --body-file "$work/body"
+          else
+            echo "Issue #$number already lists these releases."
+          fi

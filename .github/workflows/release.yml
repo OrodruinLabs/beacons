@@ -1,0 +1,135 @@
+# SPDX-FileCopyrightText: 2026 Orodruin Labs
+# SPDX-License-Identifier: MIT
+#
+# A release, from a tag v<version>:
+#
+#   1. verify, all against one commit: the tag's commit is the commit this run
+#      is for, which the checks test; plugin.json in that commit makes the tag
+#      "v" + its version; and the default branch already reaches that commit
+#      or can fast-forward to it. This job outputs the commit it verified
+#   2. the checks (ci.yml)
+#   3. the tag must still name that commit; then the GitHub release (skipped
+#      when it exists already, so a re-run is safe)
+#   4. the command that fast-forwards the default branch to that commit. This
+#      workflow cannot run it: the default branch's ruleset lets only admins
+#      move it
+#
+# Who can release. GitHub runs this file as the tagged commit has it, so the
+# checks above hold only because a ruleset on v* tags lets only admins create,
+# move or delete them.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: tag and commit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.verified.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag is this run's commit, matches plugin.json, and the default branch can fast-forward to it
+        id: verified
+        env:
+          TAG: ${{ github.ref_name }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          # Everything below is checked against this one commit.
+          sha=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if ! tested=$(git rev-parse --verify --quiet "$GITHUB_SHA^{commit}"); then
+            echo "::error::this run's commit, $GITHUB_SHA, is not in the checkout"
+            exit 1
+          fi
+          if [ "$sha" != "$tested" ]; then
+            echo "::error::$TAG names $sha, but this run, and the checks it runs, are for $tested: the tag moved after it was pushed"
+            exit 1
+          fi
+          want="v$(git show "$sha:.claude-plugin/plugin.json" | jq -er .version)"
+          if [ "$TAG" != "$want" ]; then
+            echo "::error file=.claude-plugin/plugin.json::the tag is $TAG, but plugin.json's version in $sha makes it $want"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/remotes/origin/$BRANCH" "$sha"; then
+            echo "::error::$TAG is not on $BRANCH or ahead of it: $BRANCH has commits $TAG does not. Tag a commit that $BRANCH can fast-forward to."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: checks
+    needs: verify
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: release
+    needs: [verify, ci]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      SHA: ${{ needs.verify.outputs.sha }}
+      BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag still names the commit that was verified
+        run: |
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
+            echo "::error::the verify job gave no commit (got '$SHA')"
+            exit 1
+          fi
+          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          now=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if [ "$now" != "$SHA" ]; then
+            echo "::error::$TAG was moved after it was verified: it named $SHA, and names $now now. Nothing was released."
+            exit 1
+          fi
+      - name: The GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A published release this workflow made (an earlier run of it) is left as it is. Any other release of the
+          # tag, a draft or one made by hand, is not one to fast-forward the branch beside: stop here instead.
+          if seen=$(gh release view "$TAG" --json isDraft,author --jq '"\(.isDraft) \(.author.login)"' 2> /dev/null); then
+            read -r draft author <<< "$seen"
+            if [ "$draft" = "false" ] && [ "$author" = "github-actions[bot]" ]; then
+              echo "The release $TAG exists already, published by this workflow; it was left as it is."
+            else
+              echo "::error::a release for $TAG exists that this workflow did not publish (draft: $draft, author: $author). Delete it, then run this again; nothing was released and $BRANCH was not moved."
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --target "$SHA" --verify-tag --title "beacons $TAG" \
+              --notes "Commit $SHA." --generate-notes
+          fi
+      - name: How to fast-forward the default branch to that commit
+        run: |
+          git fetch --no-tags origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          if [ "$(git rev-parse "refs/remotes/origin/$BRANCH")" = "$SHA" ]; then
+            echo "$BRANCH is already at $TAG"
+          elif ! git merge-base --is-ancestor "refs/remotes/origin/$BRANCH" "$SHA"; then
+            echo "::warning::$BRANCH moved on after $TAG was verified, so moving it to $TAG is no longer a fast-forward. The release stands; $BRANCH needs an admin's look."
+          else
+            echo "::notice::The release stands. An admin moves $BRANCH to it: git push origin $SHA:refs/heads/$BRANCH"
+          fi

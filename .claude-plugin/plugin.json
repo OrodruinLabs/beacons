@@ -1,0 +1,9 @@
+{
+  "name": "beacons",
+  "version": "0.1.0",
+  "description": "Pools your Claude accounts behind a small local gateway.",
+  "author": { "name": "Orodruin Labs", "url": "https://github.com/OrodruinLabs" },
+  "license": "MIT",
+  "homepage": "https://github.com/OrodruinLabs/beacons",
+  "repository": "https://github.com/OrodruinLabs/beacons"
+}
