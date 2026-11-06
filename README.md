@@ -27,9 +27,6 @@ You sign each of your own Claude subscription accounts in to beacons once, and r
 
 beacons runs on your machine only. In each routed profile's `settings.json` it writes one key, `ANTHROPIC_BASE_URL`, plus a status line where the profile has none. It keeps the account tokens in one file only you can read, and never writes a request body to disk. Its pooling engine comes from [teamclaude](https://github.com/KarpelesLab/teamclaude) (MIT); credits are in [NOTICE](NOTICE).
 
-> [!WARNING]
-> Any account you add to beacons can be suspended without notice. Read [Terms and account risk](#terms-and-account-risk) before you use it.
-
 ## Install
 
 ```
@@ -51,19 +48,6 @@ Then run `/beacons:setup` in Claude Code. It asks its questions in the conversat
 | `/beacons:uninstall [--purge]` | Undo setup. |
 
 Each has a terminal form, and a few commands run only in a terminal: see [Using beacons](docs/usage.md). If something goes wrong, `beacons off` in a terminal, or `! beacons off` in a session, takes every profile off beacons. It needs no model.
-
-## Terms and account risk
-
-Claude Code's [legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance) says "developers may not collect, store, or intermediate Claude.ai credentials or session tokens". beacons signs each of your accounts in, keeps its tokens on your machine, and puts them on your requests.
-
-The same page lets you sign in to Claude Code with your own subscription. It also says the usage limits "assume ordinary, individual usage".
-
-- Any account you add to beacons can be suspended without notice.
-- Anthropic has suspended accounts without notice before.
-- Use beacons only if you accept it.
-- None of this is legal advice.
-
-beacons is for single-user machines, and a pooled request runs under the plan and data settings of the account that serves it. [Limits](docs/limits.md) has these and what never goes through beacons.
 
 ## Documentation
 
