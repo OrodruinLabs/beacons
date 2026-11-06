@@ -45,8 +45,8 @@ jobs:
           TAG: ${{ github.ref_name }}
           BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          git fetch --no-tags origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
+          # The checkout (fetch-depth 0) fetched every branch and tag as they were when this run started; it kept no
+          # credential, so a git fetch here would fail on a private repository.
           # Everything below is checked against this one commit.
           sha=$(git rev-parse "refs/tags/$TAG^{commit}")
           if ! tested=$(git rev-parse --verify --quiet "$GITHUB_SHA^{commit}"); then
@@ -84,26 +84,22 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
       SHA: ${{ needs.verify.outputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
       - name: The tag still names the commit that was verified
         run: |
           if ! [[ "$SHA" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]]; then
             echo "::error::the verify job gave no commit (got '$SHA')"
             exit 1
           fi
-          git fetch --force --no-tags origin "refs/tags/$TAG:refs/tags/$TAG"
-          now=$(git rev-parse "refs/tags/$TAG^{commit}")
+          # The tag's commit as GitHub has it now. A failed call fails the step, so nothing is released.
+          now=$(gh api "repos/$GH_REPO/commits/refs/tags/$TAG" --jq .sha)
           if [ "$now" != "$SHA" ]; then
             echo "::error::$TAG was moved after it was verified: it named $SHA, and names $now now. Nothing was released."
             exit 1
           fi
       - name: The GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           # A published release this workflow made (an earlier run of it) is left as it is. Any other release of the
           # tag, a draft or one made by hand, is not this workflow's to replace: stop here instead.
