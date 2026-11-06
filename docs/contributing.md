@@ -8,7 +8,7 @@ beacons is for one person's own accounts on one machine. Requests for sharing mo
 
 Work happens on `main`, which is what the plugin marketplace installs. A release is a `v*` tag on a commit of `main`:
 
-1. Set the new version in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
+1. Set the new version in `.claude-plugin/plugin.json`, which is where beacons reads it, and in `package.json`.
 2. Tag that commit `v<version>` and push the tag. Only admins can create `v*` tags.
 3. `release.yml` checks that the tag matches `plugin.json` and is on `main`, runs the checks, and publishes the GitHub release.
 
