@@ -30,7 +30,9 @@
 //      is left alone), then each status line, which runs the launcher only
 //      when it is beacons' link and the release's bootstrap otherwise
 //      (printed instead where a profile has its own)
-//   6. with a profile routed, one real request through it; then `beacons status`
+//   6. `beacons status`. Setup sends no request of its own: Anthropic refuses a
+//      subscription request that is not Claude Code's, and the status already
+//      reads each account through the usage endpoint, which costs nothing
 //
 // Every effect goes through SetupDeps and its Run, so tests use fakes only.
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, unlinkSync, type Stats } from "node:fs"
@@ -39,7 +41,7 @@ import { createInterface, type Interface } from "node:readline/promises"
 import { accountNames, login, notifyReload, order, type LoginDeps } from "./accounts.ts"
 import { proxyAnswers } from "./chain.ts"
 import { ANTHROPIC, ensurePrivateDirs, loadGatewayConfig, readRoutes, saveGatewayConfig, writeAtomic, writeRoutes, type RoutesFile } from "./config.ts"
-import { daemonHealth, loopbackUrl, post } from "./loopback.ts"
+import { daemonHealth, loopbackUrl } from "./loopback.ts"
 import { beaconsPaths, linksInto, type Paths } from "./paths.ts"
 import { discoverProfiles, resolveProfile, tilde } from "./profiles.ts"
 import { readReleaseState, snapshot, switchTo } from "./release.ts"
@@ -49,10 +51,8 @@ import { installService, kickstart, LABEL, lingerOn, serviceKind, uninstallServi
 import { bootCheck, lockHeld } from "./upgrade.ts"
 
 export const MODES_NOTE = "A pooled profile can run on any of these accounts, under that account's plan and data settings."
-const PROBE_MODEL = "claude-haiku-5-5"
 const MARKETPLACE = "OrodruinLabs/beacons"
 const PLUGIN = "beacons@beacons"
-const PROBE_TIMEOUT_MS = 60_000
 /** A kickstart's 3 s drain, then a boot. */
 const START_BUDGET_MS = 15_000
 const POLL_MS = 250
@@ -92,8 +92,6 @@ export type SetupDeps = {
   proxyAnswers(url: string): Promise<boolean>
   /** beacons' health on its configured port, or null when nothing answers. Each call times out by itself. */
   health(): Promise<{ version: string } | null>
-  /** One POST /v1/messages through `base` (a route); the HTTP status. The one paid call setup makes. */
-  probeRequest(base: string): Promise<number>
   log(line: string): void
   /**
    * Boot the release in `dir` once, away from the real data (upgrade.ts's
@@ -556,19 +554,7 @@ export async function applySetup(plan: SetupPlan, p: Paths, deps: SetupDeps): Pr
     }
   }
 
-  // 6. One real request through a routed profile's route (none routed: none sent, since it would test nothing), then the status.
-  const first = routed[0]
-  if (first === undefined) {
-    log("no profile is routed, so setup sent no test request")
-  } else {
-    const base = routeBase(cfg.port, plan.modes[first].mode, plan.modes[first].account)
-    try {
-      const status = await deps.probeRequest(base)
-      log(status === 200 ? `a test request through ${base} answered 200` : `a test request through ${base} answered HTTP ${status}; the status below shows each account`)
-    } catch (err) {
-      log(`a test request through ${base} did not finish: ${message(err)}`)
-    }
-  }
+  // 6. The status: each account's use, the upstream proxy and each profile's route.
   try {
     const r = await deps.run(path.join(p.currentRelease, "bin", "beacons"), ["status"])
     const out = (r.stdout || r.stderr).trimEnd()
@@ -579,17 +565,6 @@ export async function applySetup(plan: SetupPlan, p: Paths, deps: SetupDeps): Pr
 }
 
 // --- the real deps --------------------------------------------------------
-
-/** The one paid call: a one-token message through `base`, a route on beacons' port. The gateway supplies the account's credential. */
-export async function probeRequest(base: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<number> {
-  const u = new URL(base)
-  if (u.protocol !== "http:" || u.hostname !== "127.0.0.1") throw new Error(`${base} is not a route on 127.0.0.1`)
-  const r = await post(Number(u.port || 80), `${u.pathname}/v1/messages`, timeoutMs, {
-    headers: { "content-type": "application/json", "anthropic-version": "2023-06-01", "anthropic-beta": "oauth-2025-04-20" },
-    body: JSON.stringify({ model: PROBE_MODEL, max_tokens: 1, messages: [{ role: "user", content: "Say ok." }] }),
-  })
-  return r.status
-}
 
 /** Who listens on <port>: `lsof` on macOS, `ss` on Linux. "node 1234", or null when nothing does or the tool cannot say. */
 export async function findPortHolder(run: Run, port: number, platform: NodeJS.Platform = process.platform): Promise<string | null> {
@@ -656,7 +631,6 @@ export function setupDeps(p: Paths, o: { run: Run; pluginRoot: string; env: Node
       }
       return daemonHealth(port)
     },
-    probeRequest: (base) => probeRequest(base),
     log: o.log ?? ((line) => console.log(line)),
     reload: (port) => notifyReload(port),
   }
@@ -771,7 +745,7 @@ function summary(plan: SetupPlan, found: SetupFound, home: string): string {
     ? `  - send on through the upstream proxy at ${plan.chain.url}; if it stops answering, ${plan.chain.fallback === "wait" ? "wait for it" : "go direct to Anthropic"}`
     : "  - send straight to Anthropic")
   if (found.beaconsHung) lines.push(`  - restart beacons, which holds port ${found.port} but is not answering`)
-  lines.push(`  - run the beacons service on 127.0.0.1:${found.port}, install the beacons plugin in each routed profile, and send one test request`)
+  lines.push(`  - run the beacons service on 127.0.0.1:${found.port} and install the beacons plugin in each routed profile`)
   return lines.join("\n")
 }
 

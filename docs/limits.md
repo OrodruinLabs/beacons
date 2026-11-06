@@ -10,6 +10,12 @@ A pooled profile can be served by any of your accounts. Each request runs under 
 
 If some work must stay under one account's settings, pin that profile to that account.
 
+## Only Claude Code's own requests
+
+Anthropic accepts a subscription account's credential only for Claude Code's own requests. Anything else sent through a route, such as a script, `curl` or another tool, gets HTTP 429 `rate_limit_error` with the message `Error` and no rate-limit headers. That is not your limit running out. See [anthropics/claude-code#87420](https://github.com/anthropics/claude-code/issues/87420) and [#103731](https://github.com/anthropics/claude-code/issues/103731).
+
+beacons does not make other requests look like Claude Code's. For the same reason, setup sends no request of its own. It ends with the status, which shows each account's use as Anthropic's usage endpoint reports it, at no cost.
+
 ## What stays direct
 
 These never go through beacons:

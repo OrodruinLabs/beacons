@@ -484,10 +484,10 @@ test("smoke: setup, a request, a heal, an upgrade under an open reply, and unins
     assert.equal(json(p.gatewayFile).upstreamUrl, up.url, "on through the chain")
     assert.equal((await daemonHealth(port))?.version, VERSION)
     assert.ok(sm.calls.includes(KIND === "launchd" ? `launchctl bootstrap gui/${UID} ${unitFile}` : `systemctl --user enable --now ${UNIT}`), sm.calls.join("\n"))
-    assert.ok(lines.includes(`a test request through ${route} answered 200`), lines.join("\n"))
     assert.ok(lines.join("\n").split("\n").includes(`beacons ${VERSION}, on 127.0.0.1:${port}`), `the release's own \`beacons status\` ran:\n${lines.join("\n")}`)
     assert.ok(loggedClaude().split("\n").includes(`${profile}\tplugin install beacons@beacons`), loggedClaude())
-    assert.equal(up.seen.length, 1, "setup's one test request")
+    // Anthropic refuses a subscription request that is not Claude Code's, so setup sends none of its own.
+    assert.equal(up.seen.length, 0, "setup sent nothing upstream")
 
     // 2. `claude -p` through the route: the account's key goes upstream, never the client's own credential.
     const asked = await launch(claude, ["-p", "hello from the smoke test"], { ...env, SMOKE_SESSION: "smoke-1" }).done

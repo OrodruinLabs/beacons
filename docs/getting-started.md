@@ -17,7 +17,7 @@ Then run `/beacons:setup` in Claude Code. It asks its questions in the conversat
 4. Sends traffic on through a local upstream proxy only when you name one with `--upstream`, or say yes when setup asks about one your profiles already route to; the answer defaults to no (see [An upstream proxy](integrations.md#an-upstream-proxy)).
 5. Installs and starts a user service (launchd on macOS, `systemd --user` on Linux).
 6. Routes the profiles, and installs this plugin in each one.
-7. Adds a status line where a profile has none, and sends one real request through the gateway to check it.
+7. Adds a status line where a profile has none, and ends with the status: each account's use, read at no cost, and each profile's route. It sends no request of its own (see [Only Claude Code's own requests](limits.md#only-claude-codes-own-requests)).
 
 Setup links `beacons` into `~/.local/bin`, and prints the PATH line to add when that folder is not on your PATH. Another program's `beacons` already there is left alone.
 

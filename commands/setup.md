@@ -98,6 +98,6 @@ On a yes, run `"${CLAUDE_PLUGIN_ROOT}/bin/beacons" setup <the same flags> --yes`
 
 - a status line to add, where a profile keeps its own;
 - the line that puts `~/.local/bin` on their PATH;
-- the test request's result and the status.
+- the status.
 
 New sessions in the routed profiles go through beacons. Running sessions in a profile whose route changed move over within seconds.

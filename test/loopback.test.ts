@@ -16,8 +16,6 @@ import { saveGatewayConfig } from "../src/config.ts"
 import { assertAllowedHost } from "../src/engine/upstream-fetch.js"
 import { daemonHealth, LOOPBACK, loopbackUrl } from "../src/loopback.ts"
 import { beaconsPaths } from "../src/paths.ts"
-import { routeBase } from "../src/route.ts"
-import { probeRequest } from "../src/setup.ts"
 
 test("loopback: every host beacons counts as this machine is one the engine sends to, and no other", () => {
   for (const host of LOOPBACK) assert.doesNotThrow(() => assertAllowedHost(`http://${host}:9100/relay`), host)
@@ -48,7 +46,6 @@ async function daemonOnBadPort(): Promise<{ port: number; seen: string[]; close(
         if (req.url === "/beacons/v1/health") return json(200, { ok: true, version: "0.3.0" })
         if (req.url === "/beacons/v1/status") return json(200, { version: "0.3.0", port, upstream: "https://api.anthropic.com", chain: null, current: null, accounts: [], sessions: [], inFlight: 0 })
         if (req.url === "/beacons/v1/reload") return json(200, { added: 0, removed: 0 })
-        if (req.url?.endsWith("/v1/messages")) return json(200, {})
         json(404, { error: "not found" })
       })
     })
@@ -80,8 +77,7 @@ test("loopback: every control call reaches a port fetch refuses", async (t) => {
     assert.equal(code, 0, out)
     assert.match(out, new RegExp(`^beacons 0\\.3\\.0, on 127\\.0\\.0\\.1:${d.port}$`, "m"))
     assert.equal(await notifyReload(d.port), true)
-    assert.equal(await probeRequest(routeBase(d.port, "pool", "a@b.com")), 200)
-    assert.deepEqual(d.seen, ["GET /beacons/v1/health", "GET /beacons/v1/status", "POST /beacons/v1/reload", "POST /pool/a%40b.com/v1/messages"])
+    assert.deepEqual(d.seen, ["GET /beacons/v1/health", "GET /beacons/v1/status", "POST /beacons/v1/reload"])
   } finally {
     await d.close()
   }

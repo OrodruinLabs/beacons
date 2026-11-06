@@ -2,15 +2,13 @@
 // SPDX-License-Identifier: MIT
 //
 // Setup, against a scratch HOME with a fake plugin copy, a fake Run and fake
-// health, upstream proxy and probe. No test runs the real claude, launchctl,
+// health and upstream proxy. No test runs the real claude, launchctl,
 // systemctl, loginctl or lsof, opens a browser, or sends a request anywhere
 // but a local fake. The wizard is driven through its injected streams: the
 // fake terminal types the next answer each time a prompt ends in "> ".
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs"
-import { createServer as createHttpServer } from "node:http"
-import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { PassThrough, Writable } from "node:stream"
@@ -20,7 +18,7 @@ import { readPool, type LoginDeps } from "../src/accounts.ts"
 import { readReleaseState, snapshot, switchTo } from "../src/release.ts"
 import { route } from "../src/routes.ts"
 import type { Run } from "../src/service.ts"
-import { applySetup, findPortHolder, holderIsBeacons, planSetup, probeRequest, setupCommand, type SetupDeps } from "../src/setup.ts"
+import { applySetup, findPortHolder, holderIsBeacons, planSetup, setupCommand, type SetupDeps } from "../src/setup.ts"
 
 const uid = process.getuid!()
 const PROXY = "http://127.0.0.1:9100/relay"
@@ -61,7 +59,7 @@ type Answer = (cmd: string, args: string[]) => { code: number; stdout?: string; 
 
 /**
  * Fake deps, on macOS unless told otherwise. Every effect goes into one log, in
- * order: each Run call, each probe, each boot check. Health answers 0.1.0 once
+ * order: each Run call, each boot check. Health answers 0.1.0 once
  * beacons' unit file is installed, unless `healthy` or `health` say otherwise.
  * The upstream proxy answers only when `proxy` says so; `asked` lists each URL it was asked at.
  */
@@ -84,7 +82,6 @@ function fakes(s: Scratch, o: {
     isBeacons: async () => o.isBeacons ?? false,
     proxyAnswers: async (url) => { asked.push(url); return o.proxy ?? false },
     health: async () => (o.health ? o.health() : (o.healthy ?? (() => existsSync(s.unit)))() ? { version: "0.1.0" } : null),
-    probeRequest: async (base) => { log.push(`probe ${base}`); return 200 },
     log: (line) => lines.push(line),
     bootCheck: o.bootCheck ?? (async (dir) => { log.push(`bootCheck ${path.basename(dir)}`); return true }),
     env: o.env ?? s.env,
@@ -621,7 +618,6 @@ test("setup: the steps run in order, each profile gets its route, plugin and sta
     "reload 4774",
     `run env ${env} claude plugin marketplace add OrodruinLabs/beacons`,
     `run env ${env} claude plugin install beacons@beacons`,
-    "probe http://127.0.0.1:4774/pool/a%40example.com",
     `run ${path.join(s.p.currentRelease, "bin", "beacons")} status`,
   ])
   assert.deepEqual(json(s.p.gatewayFile), { port: 4774, upstreamUrl: "https://api.anthropic.com", chainFallback: "wait" })
@@ -732,7 +728,7 @@ test("setup: a re-run whose new build never reports its version switches back an
   assert.equal(f.log.filter((l) => l === bootstrap).length, 2, f.log.join("\n"))
   assert.equal(f.log.at(-1), bootstrap)
   assert.ok(!f.log.some((l) => l.includes("kickstart")), f.log.join("\n"))
-  assert.ok(!f.log.some((l) => l.startsWith("run env") || l.startsWith("probe")))
+  assert.ok(!f.log.some((l) => l.startsWith("run env")))
   assert.deepEqual(bytes().slice(1), [gatewayBefore, routesBefore, settingsBefore])
 })
 
@@ -818,15 +814,6 @@ test("setup: the wait for the new build is a clock deadline, however slow each h
   assert.ok(took < 1500, `took ${took} ms`)
 })
 
-test("setup: with no profile routed, no test request is sent", async () => {
-  const s = scratch()
-  const f = fakes(s)
-  const { plan } = await planSetup(s.p, s.env, f.deps)
-  await applySetup({ ...plan, profiles: [], modes: {} }, s.p, f.deps)
-  assert.ok(!f.log.some((l) => l.startsWith("probe")), f.log.join("\n"))
-  assert.ok(f.lines.includes("no profile is routed, so setup sent no test request"))
-})
-
 test("setup: apply uses the command's env, not the env the deps came with", async () => {
   const s = scratch()
   // The deps' env has no ~/.local/bin on PATH, so a setup that used it would print the PATH line.
@@ -853,31 +840,6 @@ test("setup: the wizard stops, changing nothing, when its answers run out", asyn
 })
 
 // --- the real deps, against local fakes only ------------------------------
-
-test("setup: the probe posts one max_tokens 1 message through the route, with no credential of its own", async () => {
-  let seen: { method?: string; url?: string; headers?: Record<string, unknown>; body?: any } = {}
-  const server = createHttpServer((req, res) => {
-    let body = ""
-    req.on("data", (c) => (body += c))
-    req.on("end", () => {
-      seen = { method: req.method, url: req.url, headers: req.headers, body: JSON.parse(body) }
-      res.writeHead(200, { "content-type": "application/json" })
-      res.end("{}")
-    })
-  })
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r))
-  const { port } = server.address() as AddressInfo
-  try {
-    assert.equal(await probeRequest(`http://127.0.0.1:${port}/pool/a%40b.com`), 200)
-    assert.equal(seen.method, "POST")
-    assert.equal(seen.url, "/pool/a%40b.com/v1/messages")
-    assert.equal(seen.body.max_tokens, 1)
-    assert.equal(seen.body.messages.length, 1)
-    assert.equal(seen.headers?.authorization, undefined)
-  } finally {
-    server.close()
-  }
-})
 
 test("setup: the port holder comes from lsof on macOS and ss on Linux", async () => {
   const lsof = "COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\nnode    1234 me   20u  IPv4 0x1      0t0  TCP 127.0.0.1:4774 (LISTEN)\n"
